@@ -11,8 +11,12 @@
   },
   "dependencies": {
     "@headlessui/react": "^2.2.4",
+    "@pixi/filter-adjustment": "^5.1.1",
+    "@pixi/filter-blur": "^7.4.3",
+    "@pixi/filter-color-matrix": "^7.4.3",
     "@radix-ui/react-dialog": "^1.1.14",
     "framer-motion": "^12.15.0",
+    "pixi.js": "^8.9.2",
     "react": "^19.1.0",
     "react-confetti": "^6.4.0",
     "react-dom": "^19.1.0",

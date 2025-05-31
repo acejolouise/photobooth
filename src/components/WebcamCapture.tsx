@@ -133,23 +133,36 @@ const WebcamCapture: React.FC<WebcamCaptureProps> = ({
   const capturePhoto = useCallback(() => {
     if (!videoRef.current || !filteredCanvas || !isVideoLoaded) return;
 
-    // Create a canvas for the final photo
+    // Create a canvas for the final photo - 4 panels vertically
     const canvas = document.createElement('canvas');
     const video = videoRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const panelWidth = video.videoWidth;
+    const panelHeight = video.videoHeight;
+    
+    // Set canvas size to accommodate 4 vertical panels with small gaps
+    canvas.width = panelWidth;
+    canvas.height = (panelHeight * 4) + (30 * 3); // 30px gap between panels
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // First draw the video frame (mirrored)
-    ctx.save();
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0);
-    ctx.restore();
+    // Fill background with white
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Then overlay the filtered canvas
-    ctx.drawImage(filteredCanvas, 0, 0);
+    // Draw 4 panels with gaps
+    for (let i = 0; i < 4; i++) {
+      const yOffset = i * (panelHeight + 30); // 30px gap between panels
+      
+      // Draw video frame (mirrored)
+      ctx.save();
+      ctx.translate(canvas.width, yOffset);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0);
+      ctx.restore();
+
+      // Overlay the filter on each panel
+      ctx.drawImage(filteredCanvas, 0, yOffset);
+    }
 
     // Convert to data URL and call the callback
     const photoData = canvas.toDataURL('image/png');
@@ -165,25 +178,90 @@ const WebcamCapture: React.FC<WebcamCaptureProps> = ({
       
       setError(null);
       setIsVideoLoaded(false);
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
+
+      // Request camera with specific constraints for stability
+      const constraints: MediaStreamConstraints = {
         video: { 
           facingMode: 'user',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 }
+          width: { min: 1280, ideal: 1280, max: 1920 },
+          height: { min: 720, ideal: 720, max: 1080 },
+          frameRate: { min: 24, ideal: 30, max: 30 },
+          aspectRatio: { ideal: 16/9 }
         },
         audio: false
+      };
+
+      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Get video track and ensure it's properly initialized
+      const videoTrack = mediaStream.getVideoTracks()[0];
+      if (!videoTrack) {
+        throw new Error('No video track available');
+      }
+
+      // Wait for video element to be ready
+      if (!videoRef.current) {
+        throw new Error('Video element not initialized');
+      }
+
+      const video = videoRef.current;
+      video.srcObject = mediaStream;
+
+      // Wait for video metadata to load
+      await new Promise<void>((resolve, reject) => {
+        const handleLoadedMetadata = () => {
+          video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+          resolve();
+        };
+        
+        const handleError = (error: Event) => {
+          video.removeEventListener('error', handleError);
+          reject(new Error('Failed to load video metadata'));
+        };
+
+        video.addEventListener('loadedmetadata', handleLoadedMetadata);
+        video.addEventListener('error', handleError);
       });
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        await videoRef.current.play();
+      // Wait for video to be ready to play
+      await new Promise<void>((resolve, reject) => {
+        const handleCanPlay = () => {
+          video.removeEventListener('canplay', handleCanPlay);
+          setTimeout(resolve, 500); // Add stabilization delay
+        };
+
+        const handleError = (error: Event) => {
+          video.removeEventListener('error', handleError);
+          reject(new Error('Video failed to enter ready state'));
+        };
+
+        video.addEventListener('canplay', handleCanPlay);
+        video.addEventListener('error', handleError);
+      });
+
+      // Now safe to play
+      try {
+        await video.play();
+        setStream(mediaStream);
+        setIsVideoLoaded(true);
+      } catch (playError) {
+        throw new Error('Failed to start video playback: ' + (playError as Error).message);
       }
-      setStream(mediaStream);
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Could not access camera';
       setError(errorMessage);
       console.error('Error accessing webcam:', err);
+
+      // Clean up on error
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      setStream(null);
+      setIsVideoLoaded(false);
     }
   }, [stream]);
 

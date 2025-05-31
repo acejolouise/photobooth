@@ -10,7 +10,15 @@ export interface PhotoSession {
   createdAt: Date;
 }
 
-export type FilterType = 'normal' | 'pastel' | 'smooth' | 'sparkle';
+export type FilterType = 
+  | 'none'
+  | 'sepia'
+  | 'vintage'
+  | 'noir'
+  | 'vivid'
+  | 'dreamy'
+  | 'blur'
+  | 'pixelate';
 
 export interface Filter {
   name: FilterType;

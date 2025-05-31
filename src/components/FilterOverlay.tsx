@@ -1,142 +1,223 @@
 import React, { useEffect, useRef } from 'react';
-import styled from 'styled-components';
+import * as PIXI from 'pixi.js';
+import { AdjustmentFilter } from '@pixi/filter-adjustment';
+import { ColorMatrixFilter } from '@pixi/filter-color-matrix';
+import { BlurFilter } from '@pixi/filter-blur';
 import type { FilterType } from '../types';
+import styled from 'styled-components';
 
-const FilterContainer = styled.div`
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
+const HiddenContainer = styled.div`
+  display: none;
 `;
 
-const VideoFilter = styled.div<{ $filter: FilterType }>`
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  ${props => {
-    switch (props.$filter) {
-      case 'pastel':
-        return `
-          background: rgba(255, 192, 203, 0.15);
-          backdrop-filter: brightness(1.1) saturate(0.8);
-        `;
-      case 'smooth':
-        return `
-          backdrop-filter: blur(1px) brightness(1.1);
-        `;
-      case 'sparkle':
-        return ``;
-      default:
-        return '';
-    }
-  }}
-`;
-
-const FilterCanvas = styled.canvas`
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  mix-blend-mode: overlay;
-`;
-
-interface FilterProps {
+interface FilterOverlayProps {
   filter: FilterType;
-  videoElement?: HTMLVideoElement | null;
-  onFilteredFrame?: (canvas: HTMLCanvasElement) => void;
+  videoElement: HTMLVideoElement | null;
+  onFilteredFrame: (canvas: HTMLCanvasElement) => void;
 }
 
-const FilterOverlay: React.FC<FilterProps> = ({
+const createFilter = (type: FilterType): PIXI.Filter[] => {
+  switch (type) {
+    case 'sepia': {
+      const matrix = new ColorMatrixFilter();
+      const sepia = [
+        1.0, 0.3, 0.3, 0, 0,
+        0.8, 0.9, 0.3, 0, 0,
+        0.3, 0.3, 0.5, 0, 0,
+        0, 0, 0, 1, 0
+      ];
+      matrix.matrix = sepia;
+      return [matrix];
+    }
+    case 'vintage': {
+      const matrix = new ColorMatrixFilter();
+      matrix.brightness(0.9, false);
+      matrix.saturate(-0.2);
+      const adjustment = new AdjustmentFilter({
+        gamma: 0.8,
+        saturation: 0.8,
+        contrast: 1.2
+      });
+      return [matrix, adjustment];
+    }
+    case 'noir': {
+      const matrix = new ColorMatrixFilter();
+      const grayscale = [
+        0.33, 0.33, 0.33, 0, 0,
+        0.33, 0.33, 0.33, 0, 0,
+        0.33, 0.33, 0.33, 0, 0,
+        0, 0, 0, 1, 0
+      ];
+      matrix.matrix = grayscale;
+      const adjustment = new AdjustmentFilter({
+        contrast: 1.4,
+        brightness: 1.2
+      });
+      return [matrix, adjustment];
+    }
+    case 'vivid': {
+      const adjustment = new AdjustmentFilter({
+        saturation: 1.5,
+        contrast: 1.2,
+        brightness: 1.1
+      });
+      return [adjustment];
+    }
+    case 'dreamy': {
+      const matrix = new ColorMatrixFilter();
+      const dreamyMatrix = [
+        1.1, 0, 0, 0, 0,
+        0, 1.1, 0, 0, 0,
+        0, 0, 1.3, 0, 0,
+        0, 0, 0, 1, 0
+      ];
+      matrix.matrix = dreamyMatrix;
+      const blur = new BlurFilter(2);
+      const adjustment = new AdjustmentFilter({
+        saturation: 0.8,
+        gamma: 0.8
+      });
+      return [matrix, blur, adjustment];
+    }
+    case 'blur': {
+      return [new BlurFilter(4)];
+    }
+    case 'pixelate': {
+      class PixelateFilter extends PIXI.Filter {
+        constructor(size = 10) {
+          const fragmentShader = `
+            precision mediump float;
+            varying vec2 vTextureCoord;
+            uniform sampler2D uSampler;
+            uniform vec2 size;
+            uniform vec4 filterArea;
+            void main(void) {
+              vec2 pos = vTextureCoord * filterArea.xy;
+              vec2 pixelSize = size;
+              vec2 coord = floor(pos / pixelSize) * pixelSize;
+              vec2 uv = coord / filterArea.xy;
+              gl_FragColor = texture2D(uSampler, uv);
+            }
+          `;
+          super(null, fragmentShader, {
+            size: new Float32Array([10, 10])
+          });
+        }
+      }
+      return [new PixelateFilter(8)];
+    }
+    default:
+      return [];
+  }
+};
+
+const FilterOverlay: React.FC<FilterOverlayProps> = ({
   filter,
   videoElement,
   onFilteredFrame
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationFrameRef = useRef<number | undefined>(undefined);
-  const lastDrawTime = useRef<number>(0);
+  const pixiAppRef = useRef<PIXI.Application | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const videoTextureRef = useRef<PIXI.Texture | null>(null);
+  const frameIdRef = useRef<number>(0);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !videoElement) return;
+    if (!videoElement || !containerRef.current) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;    const updateCanvas = (timestamp: number) => {
-      // Limit updates to ~24fps to reduce CPU usage
-      if (timestamp - lastDrawTime.current < 42) { // ~24fps (1000ms/24 ≈ 42ms)
-        animationFrameRef.current = requestAnimationFrame(updateCanvas);
-        return;
-      }
-
-      // Match canvas size to video, but only if size has changed
-      if (canvas.width !== videoElement.videoWidth || 
-          canvas.height !== videoElement.videoHeight) {
-        canvas.width = videoElement.videoWidth;
-        canvas.height = videoElement.videoHeight;
-      }
-
-      // Clear previous frame
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Apply filter specific effects
-      if (filter === 'sparkle') {
-        // Draw sparkles
-        const sparkleCount = 20;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-        for (let i = 0; i < sparkleCount; i++) {
-          const x = Math.random() * canvas.width;
-          const y = Math.random() * canvas.height;
-          const size = Math.random() * 3 + 1;
-          
-          // Draw sparkle star
-          ctx.beginPath();
-          for (let j = 0; j < 5; j++) {
-            const angle = (j * 4 * Math.PI) / 5;
-            const radius = j % 2 === 0 ? size : size / 2;
-            const pointX = x + radius * Math.cos(angle);
-            const pointY = y + radius * Math.sin(angle);
-            
-            if (j === 0) {
-              ctx.moveTo(pointX, pointY);
-            } else {
-              ctx.lineTo(pointX, pointY);
-            }
-          }
-          ctx.closePath();
-          ctx.fill();
+    const initPixiApp = async () => {
+      try {
+        // Ensure video dimensions are available
+        if (!videoElement.videoWidth) {
+          await new Promise<void>((resolve) => {
+            const handleLoadedMetadata = () => {
+              videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
+              resolve();
+            };
+            videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
+          });
         }
-      }
 
-      // If we need to pass the filtered frame back
-      if (onFilteredFrame) {
-        onFilteredFrame(canvas);
-      }
+        const width = videoElement.videoWidth;
+        const height = videoElement.videoHeight;
 
-      lastDrawTime.current = timestamp;
-      animationFrameRef.current = requestAnimationFrame(updateCanvas);
+        // Create or update PIXI application
+        if (!pixiAppRef.current && containerRef.current) {
+          pixiAppRef.current = new PIXI.Application({
+            width,
+            height,
+            backgroundAlpha: 0,
+            antialias: true,
+            clearBeforeRender: true,
+          });
+          containerRef.current.appendChild(pixiAppRef.current.view as HTMLCanvasElement);
+        }
+
+        const app = pixiAppRef.current;
+        if (!app) return;
+
+        // Clean up previous texture if it exists
+        if (videoTextureRef.current) {
+          videoTextureRef.current.destroy(true);
+        }
+
+        // Create and update video texture
+        videoTextureRef.current = PIXI.Texture.from(videoElement);
+        videoTextureRef.current.baseTexture.resource.autoPlay = true;
+        videoTextureRef.current.baseTexture.resource.updateFPS = 60; // Increased for smoother updates
+
+        const videoSprite = new PIXI.Sprite(videoTextureRef.current);
+        videoSprite.width = width;
+        videoSprite.height = height;
+
+        // Clear and set up stage
+        app.stage.removeChildren();
+        app.stage.addChild(videoSprite);
+
+        // Apply filters
+        const filters = createFilter(filter);
+        videoSprite.filters = filters;
+
+        // Update frame with proper frame timing
+        const updateFrame = () => {
+          if (app.view instanceof HTMLCanvasElement) {
+            // Update texture from video
+            if (videoTextureRef.current) {
+              videoTextureRef.current.update();
+            }
+            
+            // Render and pass to callback
+            app.render();
+            onFilteredFrame(app.view);
+          }
+          frameIdRef.current = requestAnimationFrame(updateFrame);
+        };
+
+        frameIdRef.current = requestAnimationFrame(updateFrame);
+      } catch (err) {
+        console.error('Error initializing PixiJS:', err);
+      }
     };
 
-    animationFrameRef.current = requestAnimationFrame(updateCanvas);
+    initPixiApp();
 
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+      // Clean up resources
+      if (frameIdRef.current) {
+        cancelAnimationFrame(frameIdRef.current);
+        frameIdRef.current = 0;
+      }
+      if (videoTextureRef.current) {
+        videoTextureRef.current.destroy(true);
+        videoTextureRef.current = null;
+      }
+      if (pixiAppRef.current) {
+        pixiAppRef.current.destroy(true, { children: true, texture: true, baseTexture: true });
+        pixiAppRef.current = null;
       }
     };
   }, [filter, videoElement, onFilteredFrame]);
 
-  return (
-    <FilterContainer>
-      <VideoFilter $filter={filter} />
-      <FilterCanvas ref={canvasRef} />
-    </FilterContainer>
-  );
+  return <HiddenContainer ref={containerRef} />;
 };
 
-export default FilterOverlay;
+export default React.memo(FilterOverlay);
