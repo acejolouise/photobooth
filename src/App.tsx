@@ -222,18 +222,30 @@ const App: React.FC = () => {
             transition={{ duration: 0.3 }}
             className="max-w-4xl mx-auto"
           >
-            <div className="photo-grid">
-              {photos.map((photo, index) => (
-                <motion.div
-                  key={photo.id}
-                  className="photo-frame"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: index * 0.1 }}
-                >
-                  <img src={photo.dataUrl} alt={`Photo ${index + 1}`} className="w-full h-full object-cover" />
-                </motion.div>
-              ))}
+            <div className="relative w-[300px] h-[400px] mx-auto mb-6">
+              {photos.map((photo, index) => {
+                const offset = (photos.length - 1 - index) * -20;
+                const rotation = (index - (photos.length - 1) / 2) * 5;
+                return (
+                  <motion.div
+                    key={photo.id}
+                    className="photo-frame absolute top-0 left-0"
+                    style={{
+                      zIndex: index + 1,
+                      transform: `translate(${offset}px, ${offset}px) rotate(${rotation}deg)`,
+                    }}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: index * 0.1 }}
+                  >
+                    <img
+                      src={photo.dataUrl}
+                      alt={`Photo ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  </motion.div>
+                );
+              })}
             </div>
             
             <div className="flex justify-center gap-4 mt-6">

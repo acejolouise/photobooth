@@ -118,9 +118,9 @@ const WebcamCapture: React.FC<WebcamCaptureProps> = ({
   selectedFilter
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number>(countdownDuration);
-  const [stream, setStream] = useState<MediaStream | null>(null);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
   const { playCountdownBeep, playCaptureSound } = useSound();
   const [filteredCanvas, setFilteredCanvas] = useState<HTMLCanvasElement | null>(null);
@@ -171,11 +171,11 @@ const WebcamCapture: React.FC<WebcamCaptureProps> = ({
 
   const startWebcam = useCallback(async () => {
     try {
-      // Stop any existing streams
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      // Stop any existing stream tracks
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
-      
       setError(null);
       setIsVideoLoaded(false);
 
@@ -214,7 +214,7 @@ const WebcamCapture: React.FC<WebcamCaptureProps> = ({
           resolve();
         };
         
-        const handleError = (error: Event) => {
+        const handleError = () => {
           video.removeEventListener('error', handleError);
           reject(new Error('Failed to load video metadata'));
         };
@@ -230,7 +230,7 @@ const WebcamCapture: React.FC<WebcamCaptureProps> = ({
           setTimeout(resolve, 500); // Add stabilization delay
         };
 
-        const handleError = (error: Event) => {
+        const handleError = () => {
           video.removeEventListener('error', handleError);
           reject(new Error('Video failed to enter ready state'));
         };
@@ -240,51 +240,41 @@ const WebcamCapture: React.FC<WebcamCaptureProps> = ({
       });
 
       // Now safe to play
-      try {
-        await video.play();
-        setStream(mediaStream);
-        setIsVideoLoaded(true);
-      } catch (playError) {
-        throw new Error('Failed to start video playback: ' + (playError as Error).message);
-      }
+      await video.play();
+      // Store the active stream in ref
+      streamRef.current = mediaStream;
+      setIsVideoLoaded(true);
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Could not access camera';
       setError(errorMessage);
       console.error('Error accessing webcam:', err);
 
-      // Clean up on error
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      // Clean up any active stream
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
-      setStream(null);
       setIsVideoLoaded(false);
     }
-  }, [stream]);
+  }, []);
 
   useEffect(() => {
-    const video = videoRef.current;
-    const initWebcam = async () => {
-      await startWebcam();
-    };
-
-    initWebcam();
-
+    const videoEl = videoRef.current;
+    startWebcam();
     return () => {
-      if (stream) {
-        stream.getTracks().forEach((track: MediaStreamTrack) => {
-          track.stop();
-        });
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
       }
-      if (video) {
-        video.srcObject = null;
+      if (videoEl) {
+        videoEl.srcObject = null;
       }
       setIsVideoLoaded(false);
     };
-  }, [startWebcam, stream]);
+  }, [startWebcam]);
 
   useEffect(() => {
     let isMounted = true;

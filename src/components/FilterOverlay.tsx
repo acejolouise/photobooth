@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import * as PIXI from 'pixi.js';
 import { AdjustmentFilter } from '@pixi/filter-adjustment';
-import { ColorMatrixFilter } from '@pixi/filter-color-matrix';
+import { ColorMatrixFilter, type ColorMatrix } from '@pixi/filter-color-matrix';
 import { BlurFilter } from '@pixi/filter-blur';
+import { PixelateFilter } from '@pixi/filter-pixelate';
 import type { FilterType } from '../types';
 import styled from 'styled-components';
 
@@ -16,56 +17,48 @@ interface FilterOverlayProps {
   onFilteredFrame: (canvas: HTMLCanvasElement) => void;
 }
 
-const createFilter = (type: FilterType): PIXI.Filter[] => {
+function createFilter(type: FilterType) {
   switch (type) {
+    case 'none':
+    case 'normal':
+      return [];
     case 'sepia': {
       const matrix = new ColorMatrixFilter();
-      const sepia = [
-        1.0, 0.3, 0.3, 0, 0,
+      const sepiaMatrix: ColorMatrix = [
+        1, 0.3, 0.3, 0, 0,
         0.8, 0.9, 0.3, 0, 0,
         0.3, 0.3, 0.5, 0, 0,
         0, 0, 0, 1, 0
       ];
-      matrix.matrix = sepia;
+      matrix.matrix = sepiaMatrix;
       return [matrix];
     }
     case 'vintage': {
       const matrix = new ColorMatrixFilter();
       matrix.brightness(0.9, false);
       matrix.saturate(-0.2);
-      const adjustment = new AdjustmentFilter({
-        gamma: 0.8,
-        saturation: 0.8,
-        contrast: 1.2
-      });
+      const adjustment = new AdjustmentFilter({ gamma: 0.8, saturation: 0.8, contrast: 1.2 });
       return [matrix, adjustment];
     }
     case 'noir': {
       const matrix = new ColorMatrixFilter();
-      const grayscale = [
+      const gray: ColorMatrix = [
         0.33, 0.33, 0.33, 0, 0,
         0.33, 0.33, 0.33, 0, 0,
         0.33, 0.33, 0.33, 0, 0,
         0, 0, 0, 1, 0
       ];
-      matrix.matrix = grayscale;
-      const adjustment = new AdjustmentFilter({
-        contrast: 1.4,
-        brightness: 1.2
-      });
+      matrix.matrix = gray;
+      const adjustment = new AdjustmentFilter({ contrast: 1.4, brightness: 1.2 });
       return [matrix, adjustment];
     }
     case 'vivid': {
-      const adjustment = new AdjustmentFilter({
-        saturation: 1.5,
-        contrast: 1.2,
-        brightness: 1.1
-      });
+      const adjustment = new AdjustmentFilter({ saturation: 1.5, contrast: 1.2, brightness: 1.1 });
       return [adjustment];
     }
     case 'dreamy': {
       const matrix = new ColorMatrixFilter();
-      const dreamyMatrix = [
+      const dreamyMatrix: ColorMatrix = [
         1.1, 0, 0, 0, 0,
         0, 1.1, 0, 0, 0,
         0, 0, 1.3, 0, 0,
@@ -73,38 +66,31 @@ const createFilter = (type: FilterType): PIXI.Filter[] => {
       ];
       matrix.matrix = dreamyMatrix;
       const blur = new BlurFilter(2);
-      const adjustment = new AdjustmentFilter({
-        saturation: 0.8,
-        gamma: 0.8
-      });
+      const adjustment = new AdjustmentFilter({ saturation: 0.8, gamma: 0.8 });
       return [matrix, blur, adjustment];
     }
-    case 'blur': {
+    case 'blur':
       return [new BlurFilter(4)];
-    }
-    case 'pixelate': {
-      class PixelateFilter extends PIXI.Filter {
-        constructor(size = 10) {
-          const fragmentShader = `
-            precision mediump float;
-            varying vec2 vTextureCoord;
-            uniform sampler2D uSampler;
-            uniform vec2 size;
-            uniform vec4 filterArea;
-            void main(void) {
-              vec2 pos = vTextureCoord * filterArea.xy;
-              vec2 pixelSize = size;
-              vec2 coord = floor(pos / pixelSize) * pixelSize;
-              vec2 uv = coord / filterArea.xy;
-              gl_FragColor = texture2D(uSampler, uv);
-            }
-          `;
-          super(null, fragmentShader, {
-            size: new Float32Array([10, 10])
-          });
-        }
-      }
+    case 'pixelate':
       return [new PixelateFilter(8)];
+    case 'pastel': {
+      const matrix = new ColorMatrixFilter();
+      const pastelMatrix: ColorMatrix = [
+        0.9, 0, 0, 0, 20,
+        0, 0.9, 0, 0, 20,
+        0, 0, 0.9, 0, 20,
+        0, 0, 0, 1, 0
+      ];
+      matrix.matrix = pastelMatrix;
+      const adjustment = new AdjustmentFilter({ brightness: 1.1 });
+      return [matrix, adjustment];
+    }
+    case 'smooth': {
+      return [new BlurFilter(1)];
+    }
+    case 'sparkle': {
+      const adjustment = new AdjustmentFilter({ brightness: 1.2, contrast: 1.3 });
+      return [adjustment];
     }
     default:
       return [];
@@ -174,7 +160,7 @@ const FilterOverlay: React.FC<FilterOverlayProps> = ({
         app.stage.addChild(videoSprite);
 
         // Apply filters
-        const filters = createFilter(filter);
+        const filters = createFilter(filter) as unknown as PIXI.Filter[];
         videoSprite.filters = filters;
 
         // Update frame with proper frame timing
@@ -211,7 +197,7 @@ const FilterOverlay: React.FC<FilterOverlayProps> = ({
         videoTextureRef.current = null;
       }
       if (pixiAppRef.current) {
-        pixiAppRef.current.destroy(true, { children: true, texture: true, baseTexture: true });
+        pixiAppRef.current.destroy(true, { children: true, texture: true });
         pixiAppRef.current = null;
       }
     };

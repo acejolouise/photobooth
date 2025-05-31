@@ -12,13 +12,17 @@ export interface PhotoSession {
 
 export type FilterType = 
   | 'none'
+  | 'normal'
   | 'sepia'
   | 'vintage'
   | 'noir'
   | 'vivid'
   | 'dreamy'
   | 'blur'
-  | 'pixelate';
+  | 'pixelate'
+  | 'pastel'
+  | 'smooth'
+  | 'sparkle';
 
 export interface Filter {
   name: FilterType;
